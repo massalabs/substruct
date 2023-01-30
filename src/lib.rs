@@ -1,12 +1,8 @@
-use proc_macro::{TokenStream};
-// use std::mem::uninitialized;
-use quote::{
-    // format_ident,
-    quote};
-use syn::{parse_macro_input, DeriveInput, Data, Meta, NestedMeta, Lit, Attribute, Ident};
+use proc_macro::TokenStream;
+use quote::quote;
+use syn::{parse_macro_input, Attribute, Data, DeriveInput, Ident, Lit, Meta, NestedMeta};
 
 fn get_parent_attr(attr: &Attribute) -> syn::Result<Ident> {
-
     // Parse attribute like:
     // #[parent(type = "XXX")]
 
@@ -17,7 +13,12 @@ fn get_parent_attr(attr: &Attribute) -> syn::Result<Ident> {
 
     let meta_list = match meta {
         Meta::List(list) => list,
-        _ => return Err(syn::Error::new_spanned(meta, "Expected a list-style attribute")),
+        _ => {
+            return Err(syn::Error::new_spanned(
+                meta,
+                "Expected a list-style attribute",
+            ))
+        }
     };
 
     let nested = match meta_list.nested.len() {
@@ -32,7 +33,12 @@ fn get_parent_attr(attr: &Attribute) -> syn::Result<Ident> {
 
     let name_value = match nested {
         NestedMeta::Meta(Meta::NameValue(nv)) => nv,
-        _ => return Err(syn::Error::new_spanned(nested, "Expected `parent = \"<value>\"`")),
+        _ => {
+            return Err(syn::Error::new_spanned(
+                nested,
+                "Expected `parent = \"<value>\"`",
+            ))
+        }
     };
 
     if !name_value.path.is_ident("type") {
@@ -45,47 +51,14 @@ fn get_parent_attr(attr: &Attribute) -> syn::Result<Ident> {
     match &name_value.lit {
         Lit::Str(s) => {
             // String -> Ident, report an error if parsing fails
-            syn::parse_str::<Ident>(&s.value())
-                .map_err(|e|
-                    syn::Error::new_spanned(s, e)
-                )
+            syn::parse_str::<Ident>(&s.value()).map_err(|e| syn::Error::new_spanned(s, e))
         }
         lit => Err(syn::Error::new_spanned(lit, "expected string literal")),
     }
 }
 
-fn is_doc_attr(attr: &Attribute) -> syn::Result<bool> {
-
-    // Check if attr is a docstring (aka '///')
-
-    // parse attribute
-    let meta = attr.parse_meta()?;
-
-    // println!("[is_doc_attr] meta: {:?}", meta);
-
-    let meta_name_value = match meta {
-        Meta::NameValue(name_value) => name_value,
-        _ => return Err(syn::Error::new_spanned(meta, "Expected a name-value like attribute")),
-    };
-
-    let path_segment = match meta_name_value.path.segments.len() {
-        1 => &meta_name_value.path.segments[0],
-        _ => {
-            return Err(syn::Error::new_spanned(
-                meta_name_value.path,
-                "Expect only 1 segment",
-            ));
-        }
-    };
-
-    let is_doc = path_segment.ident == "doc";
-    return Ok(is_doc);
-
-}
-
 #[proc_macro_derive(SubStruct, attributes(parent))]
 pub fn derive(input: TokenStream) -> TokenStream {
-
     // Parse the input tokens into a syntax tree
     let input = parse_macro_input!(input as DeriveInput);
 
@@ -95,23 +68,15 @@ pub fn derive(input: TokenStream) -> TokenStream {
     };
 
     let name = input.ident;
-    let field_names = data_struct
-        .fields
-        .iter()
-        .map(|field| &field.ident);
-
-    // println!("input attrs len: {}", input.attrs.len());
+    let field_names = data_struct.fields.iter().map(|field| &field.ident);
 
     let attr = input
         .attrs
         .iter()
-        .filter(|a| {
-            !is_doc_attr(a).unwrap_or(false)
-        })
+        .filter_map(|a| get_parent_attr(a).ok())
         .next();
 
-    // let parent_name = get_parent_attr(&input.attrs[1]).unwrap();
-    let parent_name = get_parent_attr(attr.expect("Expect one attribute")).unwrap();
+    let parent_name = attr.expect("At least one parent attribute");
     let expanded = quote! {
         impl From<&#parent_name> for #name {
             fn from(value: &#parent_name) -> Self {
